@@ -84,13 +84,13 @@ def simulate_picking_activity(conn, robots, product_ids, activity_ids, step):
     action = random.choice(action_types)
     
     # LOGIC THỰC TẾ:
-    # - Nếu Robot đang 'Hoat dong' bình thường: Tỷ lệ thành công 95%
-    # - Nếu Robot đang bị 'Canh bao' (quá nhiệt, lỏng kẹp): Vẫn ráng chạy nhưng tỷ lệ rủi ro rơi hàng/hỏng rất cao (chỉ 40% thành công)
+    # - Nếu Robot đang 'Hoat dong' bình thường: Tỷ lệ thành công 97%
+    # - Nếu Robot đang bị 'Canh bao' (quá nhiệt, lỏng kẹp): Tỷ lệ rủi ro rơi hàng cao (chỉ 50% thành công)
     if robot_status == "Canh bao":
-        is_success = random.random() < 0.40
+        is_success = random.random() < 0.50
         note = "Canh bao chua xu ly dan den truot kep hang!"
     else:
-        is_success = random.random() < 0.95
+        is_success = random.random() < 0.97
         note = "Hoat dong tu dong hoa"
 
     result = "Thanh cong" if is_success else "That bai"
@@ -130,8 +130,8 @@ def simulate_picking_activity(conn, robots, product_ids, activity_ids, step):
 
 
 def simulate_periodic_alerts(conn, robots, activity_ids, step):
-    """Định kỳ phát sinh sự cố ngẫu nhiên mô phỏng (quá nhiệt, sai lệch cảm biến)."""
-    if step > 0 and step % 35 == 0:
+    """Định kỳ phát sinh sự cố ngẫu nhiên mô phỏng (quá nhiệt, sai lệch cảm biến mỗi 2 phút)."""
+    if step > 0 and step % 120 == 0:
         robot_id = random.choice(robots)
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         temp = round(random.uniform(50.5, 58.0), 1)

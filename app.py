@@ -808,13 +808,18 @@ with tab_crud:
         st.write("##### Tiếp nhận & Cập nhật tiến độ xử lý sự cố / cảnh báo")
         
         # Nút giải quyết nhanh tất cả cảnh báo
-        if st.button("⚡ Đánh dấu ĐÃ XỬ LÝ tất cả cảnh báo tồn đọng", key="btn_resolve_all"):
+        if st.button("⚡ Đánh dấu ĐÃ XỬ LÝ tất cả & Khôi phục Robot về bình thường", key="btn_resolve_all"):
             execute_query("""
                 UPDATE NhatKyCanhBao 
                 SET TrangThaiXuLy = 'Da xu ly', GhiChu = 'Đã xử lý an toàn và hiệu chuẩn lại'
                 WHERE TrangThaiXuLy != 'Da xu ly'
             """)
-            st.success("✅ Đã chuyển toàn bộ sự cố sang trạng thái 'Đã xử lý'!")
+            execute_query("""
+                UPDATE ThietBiRobot 
+                SET TrangThaiHoatDong = 'Hoat dong', GhiChu = 'Đã khắc phục sự cố và khôi phục vận hành'
+                WHERE TrangThaiHoatDong = 'Canh bao'
+            """)
+            st.success("✅ Đã xử lý toàn bộ sự cố và đưa tất cả Robot về trạng thái Hoạt động bình thường (3/3)!")
             st.cache_data.clear()
             st.rerun()
 
@@ -862,6 +867,16 @@ with tab_crud:
                             "UPDATE NhatKyCanhBao SET TrangThaiXuLy = ?, GhiChu = ? WHERE CanhBao_ID = ?",
                             (new_process_status, resolution_note, target_alert_id)
                         )
+                        if new_process_status == "Da xu ly":
+                            # Tự động đưa Robot về lại trạng thái 'Hoat dong' nếu không còn cảnh báo nào tồn đọng
+                            execute_query("""
+                                UPDATE ThietBiRobot 
+                                SET TrangThaiHoatDong = 'Hoat dong', GhiChu = 'Đã khắc phục cảnh báo'
+                                WHERE TrangThaiHoatDong = 'Canh bao' 
+                                  AND RobotID NOT IN (
+                                      SELECT DISTINCT RobotID FROM NhatKyCanhBao WHERE TrangThaiXuLy != 'Da xu ly'
+                                  )
+                            """)
                         st.success(f"✅ Đã cập nhật cảnh báo #{target_alert_id} thành: {new_process_status}!")
                         st.cache_data.clear()
                         st.rerun()
