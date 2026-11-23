@@ -15,6 +15,7 @@ INTERVAL = 1  # Chu kỳ cập nhật: 1 giây
 def get_connection():
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA busy_timeout = 10000")
     return conn
 

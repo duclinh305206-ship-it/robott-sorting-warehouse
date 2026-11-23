@@ -1,0 +1,8 @@
+[server]
+# Tự động cập nhật giao diện ngay khi lưu code trong VS Code (Không cần bấm Rerun)
+runOnSave = true
+fileWatcherType = "watchdog"
+headless = false
+
+[browser]
+gatherUsageStats = false

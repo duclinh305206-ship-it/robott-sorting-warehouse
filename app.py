@@ -6,6 +6,9 @@ import streamlit as st
 import plotly.express as px
 import seaborn as sns
 import matplotlib.pyplot as plt
+import threading
+import time
+from streamlit_autorefresh import st_autorefresh
 
 from realtime_page import render_realtime
 
@@ -49,13 +52,14 @@ if not DB_PATH.exists():
 
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH, timeout=5)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 10000")
     return conn
 
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=1)
 def load_data(query: str, params=()):
     conn = get_connection()
 
@@ -163,8 +167,52 @@ if selected_robot != "Tất cả robot":
     )
 
 
-if st.sidebar.button("🔄 Làm mới dữ liệu"):
+# ==========================================
+# 4.1. DONG BO REAL-TIME & MO PHONG TRUC TIEP
+# ==========================================
 
+st.sidebar.divider()
+st.sidebar.header("⚡ Đồng bộ Real-time")
+
+live_sync = st.sidebar.toggle("Tự động đồng bộ không delay (1s)", value=True, key="toggle_live_sync")
+if live_sync:
+    st_autorefresh(interval=1000, key="auto_sync_main_dashboard")
+
+# Điều khiển mô phỏng trực tiếp từ Web Dashboard (không cần mở terminal nếu muốn)
+if "sim_bg_running" not in st.session_state:
+    st.session_state.sim_bg_running = False
+
+def bg_simulation_worker():
+    import mo_phong_du_lieu
+    step = 0
+    while st.session_state.get("sim_bg_running", False):
+        try:
+            with mo_phong_du_lieu.get_connection() as c:
+                robots = [r[0] for r in c.execute("SELECT RobotID FROM ThietBiRobot").fetchall()]
+                act_ids = {rid: c.execute("SELECT HoatDongID FROM NhatKyHoatDong WHERE RobotID = ? ORDER BY HoatDongID DESC LIMIT 1", (rid,)).fetchone()[0] for rid in robots}
+                sensors = [{"CamBienID": r[0], "RobotID": r[1], "LoaiCamBien": r[2], "DonViDo": r[3]} for r in c.execute("SELECT CamBienID, RobotID, LoaiCamBien, DonViDo FROM CamBien").fetchall()]
+                product_ids = [r[0] for r in c.execute("SELECT MaHangID FROM MaHang").fetchall()]
+                
+                mo_phong_du_lieu.simulate_joint_data(c, robots, act_ids, step)
+                mo_phong_du_lieu.simulate_sensor_data(c, sensors, act_ids, step)
+                mo_phong_du_lieu.simulate_picking_activity(c, robots, product_ids, act_ids, step)
+                mo_phong_du_lieu.simulate_periodic_alerts(c, robots, act_ids, step)
+            step += 1
+            time.sleep(1)
+        except Exception:
+            time.sleep(1)
+
+sim_switch = st.sidebar.toggle("▶️ Chạy mô phỏng trực tiếp trên Web", value=st.session_state.sim_bg_running, key="sim_web_switch")
+if sim_switch != st.session_state.sim_bg_running:
+    st.session_state.sim_bg_running = sim_switch
+    if sim_switch:
+        th = threading.Thread(target=bg_simulation_worker, daemon=True)
+        th.start()
+        st.sidebar.success("🟢 Mô phỏng đang chạy ngầm mỗi 1s...")
+    else:
+        st.sidebar.info("⏹️ Đã dừng mô phỏng.")
+
+if st.sidebar.button("🔄 Làm mới thủ công"):
     st.cache_data.clear()
     st.rerun()
 
