@@ -178,12 +178,20 @@ sensor_count = count_rows("CamBien")
 activity_count = count_rows("NhatKyHoatDong")
 alert_count = count_rows("NhatKyCanhBao")
 
-col1, col2, col3, col4 = st.columns(4)
+# Thống kê tỷ lệ gắp hàng và hoạt động
+success_df = load_data("""
+    SELECT 
+        COUNT(*) AS total,
+        SUM(CASE WHEN KetQua = 'Thanh cong' THEN 1 ELSE 0 END) AS success,
+        SUM(CASE WHEN KetQua != 'Thanh cong' THEN 1 ELSE 0 END) AS fail
+    FROM NhatKyHoatDong
+""")
+total_act = int(success_df.iloc[0]["total"]) if not success_df.empty and pd.notna(success_df.iloc[0]["total"]) else 0
+success_act = int(success_df.iloc[0]["success"]) if not success_df.empty and pd.notna(success_df.iloc[0]["success"]) else 0
+fail_act = total_act - success_act
+success_rate = (success_act / total_act * 100) if total_act > 0 else 0.0
 
-col1.metric("Tổng số robot", robot_count)
-col2.metric("Tổng số cảm biến", sensor_count)
-col3.metric("Tổng hoạt động", activity_count)
-col4.metric("Tổng cảnh báo", alert_count)
+active_robots = len(robot_df[robot_df["TrangThaiHoatDong"] == "Hoat dong"])
 
 # Banner cảnh báo nếu có sự cố chưa xử lý
 unhandled_alerts = load_data("""
@@ -192,6 +200,14 @@ unhandled_alerts = load_data("""
     WHERE TrangThaiXuLy != 'Da xu ly'
 """)
 unhandled_total = int(unhandled_alerts.iloc[0]["total"]) if not unhandled_alerts.empty else 0
+
+col1, col2, col3, col4, col5 = st.columns(5)
+col1.metric("Robot hoạt động", f"{active_robots} / {robot_count}", "Đang vận hành")
+col2.metric("Tổng lượt gắp hàng", f"{total_act:,} lượt")
+col3.metric("Tỷ lệ gắp thành công", f"{success_rate:.1f}%", f"{success_act} kiện đạt")
+col4.metric("Tỷ lệ lỗi / rơi hàng", f"{(100 - success_rate):.1f}%", f"{fail_act} kiện lỗi", delta_color="inverse")
+col5.metric("Sự cố tồn đọng", f"{unhandled_total} cảnh báo", "Cần xử lý" if unhandled_total > 0 else "An toàn", delta_color="inverse" if unhandled_total > 0 else "normal")
+
 if unhandled_total > 0:
     st.warning(
         f"⚠️ **Hệ thống đang có {unhandled_total} cảnh báo sự cố chưa được xử lý xong!** "
@@ -260,6 +276,55 @@ with tab_overview:
         st.bar_chart(
             status_counts.set_index("Trạng thái")
         )
+
+
+    st.subheader("🎯 Tỷ lệ hoạt động & Hiệu suất gắp hàng của Robot")
+    p_col1, p_col2 = st.columns(2)
+
+    with p_col1:
+        st.write("##### Tỷ lệ gắp hàng toàn hệ thống")
+        if total_act > 0:
+            pie_df = pd.DataFrame({
+                "KetQua": ["Thành công", "Lỗi / Sự cố"],
+                "SoLuong": [success_act, fail_act]
+            })
+            fig_pie = px.pie(
+                pie_df,
+                names="KetQua",
+                values="SoLuong",
+                hole=0.45,
+                color="KetQua",
+                color_discrete_map={"Thành công": "#28a745", "Lỗi / Sự cố": "#dc3545"}
+            )
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig_pie, use_container_width=True)
+        else:
+            st.info("Chưa có dữ liệu gắp hàng.")
+
+    with p_col2:
+        st.write("##### Hiệu suất phân loại theo từng Robot")
+        robot_perf = load_data("""
+            SELECT 
+                r.TenRobot,
+                COUNT(a.HoatDongID) AS TongSoKien,
+                SUM(CASE WHEN a.KetQua = 'Thanh cong' THEN 1 ELSE 0 END) AS ThanhCong,
+                SUM(CASE WHEN a.KetQua != 'Thanh cong' THEN 1 ELSE 0 END) AS SoLoi
+            FROM ThietBiRobot r
+            LEFT JOIN NhatKyHoatDong a ON r.RobotID = a.RobotID
+            GROUP BY r.RobotID, r.TenRobot
+            ORDER BY r.RobotID
+        """)
+        if not robot_perf.empty:
+            fig_bar_perf = px.bar(
+                robot_perf,
+                x="TenRobot",
+                y=["ThanhCong", "SoLoi"],
+                barmode="group",
+                title="Số lượt gắp Thành công vs Lỗi theo Robot",
+                labels={"value": "Số lượt", "TenRobot": "Robot", "variable": "Kết quả"},
+                color_discrete_map={"ThanhCong": "#28a745", "SoLoi": "#dc3545"}
+            )
+            st.plotly_chart(fig_bar_perf, use_container_width=True)
 
 
     st.subheader("Số hoạt động theo robot")
@@ -629,7 +694,7 @@ with tab_crud:
 
     crud_action = st.radio(
         "Chọn tác vụ quản lý:",
-        ["🔧 Cập nhật trạng thái Robot", "🛠️ Xử lý cảnh báo sự cố", "📦 Thêm mới mã hàng hóa"],
+        ["🔧 Cập nhật trạng thái Robot", "🛠️ Xử lý cảnh báo sự cố", "📦 Thêm mới mã hàng hóa", "🚨 Kích hoạt sự cố thử nghiệm"],
         horizontal=True,
         key="crud_action_choice"
     )
@@ -804,6 +869,57 @@ with tab_crud:
                         st.rerun()
                     except Exception as ex:
                         st.error(f"Lỗi khi thêm sản phẩm (có thể trùng mã): {ex}")
+
+    elif crud_action == "🚨 Kích hoạt sự cố thử nghiệm":
+        st.write("##### Giả lập sự cố cánh tay robot để kiểm thử quy trình xử lý (Demo)")
+        st.info("💡 Tính năng này giúp mày hoặc giảng viên tạo ra một lỗi bất kỳ ngay lập tức để xem hệ thống cảnh báo và kiểm tra quy trình xử lý sự cố.")
+        
+        with st.form("form_inject_fault"):
+            robot_choices = {
+                f"{row['TenRobot']} ({row['ModelRobot']})": int(row['RobotID'])
+                for _, row in robot_df.iterrows()
+            }
+            fault_robot_label = st.selectbox("Chọn Robot bị sự cố:", list(robot_choices.keys()))
+            target_fault_robot_id = robot_choices[fault_robot_label]
+            
+            fault_type = st.selectbox(
+                "Loại sự cố / cảnh báo phát sinh:",
+                [
+                    "🔥 Động cơ khớp nối quá nhiệt (54.5°C) - Cần làm mát khẩn cấp",
+                    "⚠️ Lực hút kẹp không đủ - Trượt rơi kiện hàng trên băng chuyền",
+                    "🛑 Sai lệch góc quay trục J2 vượt dung sai cho phép (±3.2°)",
+                    "📡 Cảm biến LiDAR phát hiện vật cản bất thường trong bán kính gắp",
+                    "⚡ Quá tải mô-men xoắn khi gắp kiện hàng nặng"
+                ]
+            )
+            
+            fault_level = st.selectbox("Mức độ nghiêm trọng:", ["Cao", "Trung binh", "Nghiem trong"])
+            
+            btn_trigger_fault = st.form_submit_button("🚨 Kích hoạt sự cố ngay")
+            if btn_trigger_fault:
+                try:
+                    from datetime import datetime
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    # 1. Ghi nhận cảnh báo mới vào CSDL
+                    execute_query("""
+                        INSERT INTO NhatKyCanhBao (
+                            RobotID, HoatDongID, ThoiGian, MaLoi, MucDo, NoiDung, TrangThaiXuLy, GhiChu
+                        )
+                        VALUES (?, NULL, ?, 'ERR_DEMO', ?, ?, 'Chua xu ly', 'Su co kich hoat thu nghiem')
+                    """, (target_fault_robot_id, now_str, fault_level, fault_type))
+                    
+                    # 2. Đổi trạng thái Robot sang 'Canh bao'
+                    execute_query(
+                        "UPDATE ThietBiRobot SET TrangThaiHoatDong = 'Canh bao', GhiChu = ? WHERE RobotID = ?",
+                        (f"Đang gặp sự cố: {fault_type[:30]}...", target_fault_robot_id)
+                    )
+                    
+                    st.error(f"🚨 ĐÃ KÍCH HOẠT SỰ CỐ TRÊN {fault_robot_label}! Banner màu vàng đã xuất hiện trên hệ thống.")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as ex:
+                    st.error(f"Lỗi: {ex}")
 
 
 # ==========================================

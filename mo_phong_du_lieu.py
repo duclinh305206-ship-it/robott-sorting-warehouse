@@ -51,6 +51,79 @@ def simulate_joint_data(conn, robots, activity_ids, step):
         ))
 
 
+def simulate_picking_activity(conn, robots, product_ids, activity_ids, step):
+    """Mô phỏng chu kỳ gắp và phân loại sản phẩm của cánh tay robot (mỗi 4 giây một lượt)."""
+    if step % 4 != 0 or not product_ids:
+        return
+
+    robot_id = random.choice(robots)
+    product_id = random.choice(product_ids)
+    action_types = [
+        "Gap san pham",
+        "Phan loai san pham",
+        "Di chuyen san pham",
+        "Kiem tra san pham",
+        "Dat san pham vao khay"
+    ]
+    action = random.choice(action_types)
+    
+    # 90% thành công, 10% thất bại/sự cố gắp
+    is_success = random.random() < 0.90
+    result = "Thanh cong" if is_success else "That bai"
+    duration = round(random.uniform(2.5, 6.0), 2)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    cur = conn.execute("""
+        INSERT INTO NhatKyHoatDong (
+            RobotID, MaHangID, ThoiGianBatDau, ThoiGianKetThuc,
+            LoaiThaoTac, KetQua, ThoiGianXuLy, GhiChu
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        robot_id,
+        product_id,
+        now_str,
+        now_str,
+        action,
+        result,
+        duration,
+        "Hoat dong tu dong hoa" if is_success else "Su co truot kep hang"
+    ))
+    activity_ids[robot_id] = cur.lastrowid
+    
+    # Nếu thất bại, phát sinh cảnh báo ngay lập tức
+    if not is_success:
+        err_msg = f"Robot {robot_id} thao tac '{action}' that bai (truot luc hut/kep)."
+        conn.execute("""
+            INSERT INTO NhatKyCanhBao (
+                RobotID, HoatDongID, ThoiGian, MaLoi, MucDo, NoiDung, TrangThaiXuLy, GhiChu
+            )
+            VALUES (?, ?, ?, 'E001', 'Cao', ?, 'Chua xu ly', 'Phat hien tu dong qua cam bien')
+        """, (robot_id, activity_ids[robot_id], now_str, err_msg))
+        
+        conn.execute("UPDATE ThietBiRobot SET TrangThaiHoatDong = 'Canh bao' WHERE RobotID = ?", (robot_id,))
+        print(f"\n[⚠️ CANH BAO TU DONG] Robot {robot_id}: {err_msg}")
+
+
+def simulate_periodic_alerts(conn, robots, activity_ids, step):
+    """Định kỳ phát sinh sự cố ngẫu nhiên mô phỏng (quá nhiệt, sai lệch cảm biến)."""
+    if step > 0 and step % 35 == 0:
+        robot_id = random.choice(robots)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        temp = round(random.uniform(50.5, 58.0), 1)
+        err_msg = f"Dong co khop noi Robot {robot_id} qua nhiet dat {temp}°C, can lam mat gap."
+        
+        conn.execute("""
+            INSERT INTO NhatKyCanhBao (
+                RobotID, HoatDongID, ThoiGian, MaLoi, MucDo, NoiDung, TrangThaiXuLy, GhiChu
+            )
+            VALUES (?, ?, ?, 'W_TEMP', 'Cao', ?, 'Chua xu ly', 'Canh bao nhiet do khop noi')
+        """, (robot_id, activity_ids.get(robot_id), now_str, err_msg))
+        
+        conn.execute("UPDATE ThietBiRobot SET TrangThaiHoatDong = 'Canh bao' WHERE RobotID = ?", (robot_id,))
+        print(f"\n[🔥 CANH BAO QUA NHIET] Robot {robot_id}: {err_msg}")
+
+
 def simulate_sensor_data(conn, sensors, activity_ids, step):
     """Tạo dữ liệu cho các cảm biến."""
 
@@ -168,19 +241,37 @@ def main():
                 print("LOI: Chua co cam bien trong database.")
                 return
 
+            # Lấy danh sách mã hàng
+            product_ids = [
+                row[0] for row in conn.execute("SELECT MaHangID FROM MaHang").fetchall()
+            ]
+
         print(f"So robot: {len(robots)}")
         print(f"So cam bien: {len(sensors)}")
-        print("Bat dau mo phong moi 1 giay...")
+        print(f"So ma hang: {len(product_ids)}")
+        print("Bat dau mo phong moi 1 giay (goc khop, cam bien, hoat dong gap hang & canh bao)...")
         print("Nhan Ctrl + C de dung.\n")
 
         while True:
             with get_connection() as conn:
+                # 1. Sinh dữ liệu góc 6 khớp
                 simulate_joint_data(
                     conn, robots, activity_ids, step
                 )
 
+                # 2. Sinh dữ liệu cảm biến
                 simulate_sensor_data(
                     conn, sensors, activity_ids, step
+                )
+
+                # 3. Định kỳ gắp/phân loại sản phẩm (mỗi 4s)
+                simulate_picking_activity(
+                    conn, robots, product_ids, activity_ids, step
+                )
+
+                # 4. Định kỳ phát sinh sự cố ngẫu nhiên (mỗi 35s)
+                simulate_periodic_alerts(
+                    conn, robots, activity_ids, step
                 )
 
             step += 1
