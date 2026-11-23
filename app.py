@@ -38,6 +38,13 @@ st.markdown("""
         padding: 14px;
         border-radius: 10px;
     }
+
+    /* Vô hiệu hóa hoàn toàn hiệu ứng làm mờ / xám màn hình khi Streamlit cập nhật dữ liệu */
+    .stApp, div[data-testid="stAppViewContainer"], div[data-testid="stAppViewBlockContainer"], .main {
+        opacity: 1 !important;
+        filter: none !important;
+        transition: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -174,8 +181,18 @@ if selected_robot != "Tất cả robot":
 st.sidebar.divider()
 st.sidebar.header("⚡ Đồng bộ Real-time")
 
-live_sync = st.sidebar.toggle("Tự động đồng bộ không delay (1s)", value=True, key="toggle_live_sync")
-if live_sync:
+sync_mode = st.sidebar.selectbox(
+    "Chu kỳ tự động làm mới:",
+    ["3 giây (Khuyên dùng)", "5 giây", "1 giây (Nhanh)", "Tắt (Thủ công)"],
+    index=0,
+    key="sync_mode_choice"
+)
+
+if sync_mode == "3 giây (Khuyên dùng)":
+    st_autorefresh(interval=3000, key="auto_sync_main_dashboard")
+elif sync_mode == "5 giây":
+    st_autorefresh(interval=5000, key="auto_sync_main_dashboard")
+elif sync_mode == "1 giây (Nhanh)":
     st_autorefresh(interval=1000, key="auto_sync_main_dashboard")
 
 # Điều khiển mô phỏng trực tiếp từ Web Dashboard (không cần mở terminal nếu muốn)
@@ -807,8 +824,8 @@ with tab_crud:
     elif crud_action == "🛠️ Xử lý cảnh báo sự cố":
         st.write("##### Tiếp nhận & Cập nhật tiến độ xử lý sự cố / cảnh báo")
         
-        # Nút giải quyết nhanh tất cả cảnh báo
-        if st.button("⚡ Đánh dấu ĐÃ XỬ LÝ tất cả & Khôi phục Robot về bình thường", key="btn_resolve_all"):
+        # Hàm callback xử lý ngay tức thì khi nhận click (bấm 1 lần là ăn ngay)
+        def on_resolve_all_click():
             execute_query("""
                 UPDATE NhatKyCanhBao 
                 SET TrangThaiXuLy = 'Da xu ly', GhiChu = 'Đã xử lý an toàn và hiệu chuẩn lại'
@@ -819,9 +836,17 @@ with tab_crud:
                 SET TrangThaiHoatDong = 'Hoat dong', GhiChu = 'Đã khắc phục sự cố và khôi phục vận hành'
                 WHERE TrangThaiHoatDong = 'Canh bao'
             """)
-            st.success("✅ Đã xử lý toàn bộ sự cố và đưa tất cả Robot về trạng thái Hoạt động bình thường (3/3)!")
+            st.session_state["msg_resolved"] = "✅ Đã xử lý toàn bộ sự cố và đưa tất cả Robot về trạng thái Hoạt động bình thường (3/3)!"
             st.cache_data.clear()
-            st.rerun()
+
+        st.button(
+            "⚡ Đánh dấu ĐÃ XỬ LÝ tất cả & Khôi phục Robot về bình thường",
+            key="btn_resolve_all",
+            on_click=on_resolve_all_click
+        )
+
+        if st.session_state.get("msg_resolved"):
+            st.success(st.session_state.pop("msg_resolved"))
 
         all_alerts = load_data("""
             SELECT a.CanhBao_ID, r.TenRobot, a.ThoiGian, a.MucDo, a.NoiDung, a.TrangThaiXuLy, a.GhiChu
