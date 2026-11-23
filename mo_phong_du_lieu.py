@@ -57,7 +57,22 @@ def simulate_picking_activity(conn, robots, product_ids, activity_ids, step):
     if step % 4 != 0 or not product_ids:
         return
 
-    robot_id = random.choice(robots)
+    # Lấy trạng thái thực tế của các robot từ CSDL:
+    # Robot đang 'Bao tri' hoặc 'Ngung hoat dong' -> DỪNG KHẨN CẤP, KHÔNG ĐƯỢC PHÉP GẮP HÀNG!
+    active_robots = conn.execute("""
+        SELECT RobotID, TrangThaiHoatDong 
+        FROM ThietBiRobot 
+        WHERE TrangThaiHoatDong NOT IN ('Bao tri', 'Ngung hoat dong')
+    """).fetchall()
+
+    if not active_robots:
+        # Nếu tất cả robot đều dừng hoặc bảo trì thì tạm ngừng dây chuyền gắp
+        return
+
+    selected_robot = random.choice(active_robots)
+    robot_id = selected_robot[0]
+    robot_status = selected_robot[1]
+
     product_id = random.choice(product_ids)
     action_types = [
         "Gap san pham",
@@ -68,8 +83,16 @@ def simulate_picking_activity(conn, robots, product_ids, activity_ids, step):
     ]
     action = random.choice(action_types)
     
-    # 90% thành công, 10% thất bại/sự cố gắp
-    is_success = random.random() < 0.90
+    # LOGIC THỰC TẾ:
+    # - Nếu Robot đang 'Hoat dong' bình thường: Tỷ lệ thành công 95%
+    # - Nếu Robot đang bị 'Canh bao' (quá nhiệt, lỏng kẹp): Vẫn ráng chạy nhưng tỷ lệ rủi ro rơi hàng/hỏng rất cao (chỉ 40% thành công)
+    if robot_status == "Canh bao":
+        is_success = random.random() < 0.40
+        note = "Canh bao chua xu ly dan den truot kep hang!"
+    else:
+        is_success = random.random() < 0.95
+        note = "Hoat dong tu dong hoa"
+
     result = "Thanh cong" if is_success else "That bai"
     duration = round(random.uniform(2.5, 6.0), 2)
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -88,7 +111,7 @@ def simulate_picking_activity(conn, robots, product_ids, activity_ids, step):
         action,
         result,
         duration,
-        "Hoat dong tu dong hoa" if is_success else "Su co truot kep hang"
+        note
     ))
     activity_ids[robot_id] = cur.lastrowid
     
