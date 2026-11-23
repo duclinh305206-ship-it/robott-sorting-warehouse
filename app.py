@@ -239,7 +239,19 @@ success_act = int(success_df.iloc[0]["success"]) if not success_df.empty and pd.
 fail_act = total_act - success_act
 success_rate = (success_act / total_act * 100) if total_act > 0 else 0.0
 
-active_robots = len(robot_df[robot_df["TrangThaiHoatDong"] == "Hoat dong"])
+normal_robots = len(robot_df[robot_df["TrangThaiHoatDong"] == "Hoat dong"])
+warning_robots = len(robot_df[robot_df["TrangThaiHoatDong"] == "Canh bao"])
+maint_robots = len(robot_df[robot_df["TrangThaiHoatDong"].isin(["Bao tri", "Ngung hoat dong"])])
+
+if warning_robots > 0:
+    robot_delta = f"⚠️ {warning_robots} robot cảnh báo"
+    delta_color_type = "inverse"
+elif normal_robots == robot_count:
+    robot_delta = "🟢 Tất cả bình thường"
+    delta_color_type = "normal"
+else:
+    robot_delta = f"🔧 {maint_robots} robot bảo trì"
+    delta_color_type = "off"
 
 # Banner cảnh báo nếu có sự cố chưa xử lý
 unhandled_alerts = load_data("""
@@ -250,7 +262,7 @@ unhandled_alerts = load_data("""
 unhandled_total = int(unhandled_alerts.iloc[0]["total"]) if not unhandled_alerts.empty else 0
 
 col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("Robot hoạt động", f"{active_robots} / {robot_count}", "Đang vận hành")
+col1.metric("Robot bình thường", f"{normal_robots} / {robot_count}", robot_delta, delta_color=delta_color_type)
 col2.metric("Tổng lượt gắp hàng", f"{total_act:,} lượt")
 col3.metric("Tỷ lệ gắp thành công", f"{success_rate:.1f}%", f"{success_act} kiện đạt")
 col4.metric("Tỷ lệ lỗi / rơi hàng", f"{(100 - success_rate):.1f}%", f"{fail_act} kiện lỗi", delta_color="inverse")
